@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cloudsmith-secret-creator
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: default
+  name: secret-manager
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["create", "update", "patch", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: secret-manager-binding
+  namespace: default
+subjects:
+- kind: ServiceAccount
+  name: cloudsmith-secret-creator
+  namespace: default
+roleRef:
+  kind: Role
+  name: secret-manager
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cloudsmith-secret-creator
+  namespace: default
+spec:
+  schedule: "0 */12 * * *"
+  concurrencyPolicy: Replace
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: cloudsmith-secret-creator
+          volumes:
+          - name: shared-data
+            emptyDir: {}
+          initContainers:
+          - name: fetch-and-parse-token
+            image: nicolaka/netshoot
+            env:
+            - name: CLOUDSMITH_ORG
+              value: "iduffy-demo"  # Replace with your Cloudsmith org name
+            - name: CLOUDSMITH_SERVICE_SLUG
+              value: "kubernetes"  # Replace with your Cloudsmith service slug
+            - name: CLOUDSMITH_DOCKER_SERVER
+              value: "docker.cloudsmith.io"  # Replace if necessary
+            volumeMounts:
+            - name: shared-data
+              mountPath: /shared
+            command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+              curl -sSL -X POST -H "Content-Type: application/json" \
+                -d "{\"oidc_token\":\"$TOKEN\", \"service_slug\":\"$CLOUDSMITH_SERVICE_SLUG\"}" \
+                https://api.cloudsmith.io/openid/$CLOUDSMITH_ORG/ | \
+                jq -r '.token' > /shared/cloudsmith_token.txt
+              echo $CLOUDSMITH_SERVICE_SLUG > /shared/service_slug.txt
+              echo $CLOUDSMITH_DOCKER_SERVER > /shared/docker_server.txt
+          containers:
+          - name: create-secret
+            image: bitnami/kubectl:latest
+            volumeMounts:
+            - name: shared-data
+              mountPath: /shared
+            command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              CLOUDSMITH_TOKEN=$(cat /shared/cloudsmith_token.txt)
+              CLOUDSMITH_SERVICE_SLUG=$(cat /shared/service_slug.txt)
+              CLOUDSMITH_DOCKER_SERVER=$(cat /shared/docker_server.txt)
+              kubectl create secret docker-registry cloudsmith-registry-secret \
+                --docker-server="$CLOUDSMITH_DOCKER_SERVER" \
+                --docker-username="$CLOUDSMITH_SERVICE_SLUG" \
+                --docker-password="$CLOUDSMITH_TOKEN" \
+                --dry-run=client -o yaml | kubectl apply -f -
+          restartPolicy: OnFailure
