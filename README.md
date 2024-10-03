@@ -1,7 +1,5 @@
 # Cloudsmith OIDC Token Demo
 
-**Important: This is not an official Cloudsmith solution. This project is a community-created demonstration and is not affiliated with, endorsed, or supported by Cloudsmith.**
-
 This project demonstrates how to use Kubernete's service account tokens to populate a Kubernetes image pull secret for Cloudsmith. It consists of two main components:
 
 1. A CronJob (`job.yaml`) that regularly fetches a Cloudsmith token using the Kubernetes service account token.
