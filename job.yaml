@@ -34,7 +34,8 @@ metadata:
   name: cloudsmith-secret-creator
   namespace: default
 spec:
-  schedule: "0 */12 * * *"
+  # Run every 1 hour 45mins, oidc tokens expire after 2 hours.
+  schedule: "45 */2 * * * *"
   concurrencyPolicy: Replace
   jobTemplate:
     spec:
